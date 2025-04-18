@@ -1,0 +1,4 @@
+/app_
+.venv
+uv.lock
+app/data/*

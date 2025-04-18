@@ -1,0 +1,141 @@
+version: '3.8'
+services:
+  rabbitmq:
+    image: rabbitmq:3-management
+    ports:
+      - "5672:5672"  # AMQP
+      - "15672:15672"  # Management UI
+    networks:
+      - app-network
+    healthcheck:
+      test: ["CMD", "rabbitmqctl", "status"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+      start_period: 10s  # Allow startup time
+
+  # redis:
+  #   image: redis:latest
+  #   ports:
+  #     - "6379:6379"
+  #   networks:
+  #     - app-network
+  #   healthcheck:
+  #     test: ["CMD", "redis-cli", "ping"]
+  #     interval: 10s
+  #     timeout: 5s
+  #     retries: 5
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    ports:
+      - "8000:8000"
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    networks:
+      - app-network
+    environment:
+    - NODE_ENV=production
+    - REDIS_USERNAME=default
+    - REDIS_PASSWORD=A2hs2VnLo2LP4UJMHNWXcS0VIJdwiO0U
+    - REDIS_HOST=redis-15181.c275.us-east-1-4.ec2.redns.redis-cloud.com
+    - REDIS_PORT=15181
+    - REDIS_DB=0
+    - RABBITMQ_HOST=rabbitmq
+
+  # frontend:
+  #   build:
+  #     context: ./frontend
+  #     dockerfile: Dockerfile
+  #   ports:
+  #     - "3001:3000"  # Map to 3001 to avoid conflict with backend
+  #   networks:
+  #     - app-network
+
+  preprocess:
+    build:
+      context: ./workers
+      dockerfile: Dockerfile
+    volumes:
+      - ./workers/app/data:/app/data
+    networks:
+      - app-network
+    command: /bin/bash -c "source .venv/bin/activate && python -m app.preprocess"
+    environment:
+      - REDIS_USERNAME=default
+      - REDIS_PASSWORD=A2hs2VnLo2LP4UJMHNWXcS0VIJdwiO0U
+      - REDIS_HOST=redis-15181.c275.us-east-1-4.ec2.redns.redis-cloud.com
+      - REDIS_PORT=15181
+      - REDIS_DB=0
+      - RABBITMQ_HOST=rabbitmq
+      - PINECONE_API_KEY=pcsk_Tq7mn_QBLx9zduBRFh9sFF3NNzFe4iAZpqpceWkZwAjKhHnap9FVLAu91xZLwt48BQrvF
+      - PINECONE_ENVIRONMENT=us-east-1
+
+  inference_worker:
+    build:
+      context: ./workers
+      dockerfile: Dockerfile
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+      preprocess:
+        condition: service_completed_successfully
+    networks:
+      - app-network
+    command: /bin/bash -c "source .venv/bin/activate && python -m app.inference_worker"
+    environment:
+      - REDIS_USERNAME=default
+      - REDIS_PASSWORD=A2hs2VnLo2LP4UJMHNWXcS0VIJdwiO0U
+      - REDIS_HOST=redis-15181.c275.us-east-1-4.ec2.redns.redis-cloud.com
+      - REDIS_PORT=15181
+      - REDIS_DB=0
+      - RABBITMQ_HOST=rabbitmq
+      - PINECONE_API_KEY=pcsk_Tq7mn_QBLx9zduBRFh9sFF3NNzFe4iAZpqpceWkZwAjKhHnap9FVLAu91xZLwt48BQrvF
+      - PINECONE_ENVIRONMENT=us-east-1
+
+  training_worker:
+    build:
+      context: ./workers
+      dockerfile: Dockerfile
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+      preprocess:
+        condition: service_completed_successfully
+    networks:
+      - app-network
+    command: /bin/bash -c "source .venv/bin/activate && python -m app.training_worker"
+    environment:
+      - REDIS_USERNAME=default
+      - REDIS_PASSWORD=A2hs2VnLo2LP4UJMHNWXcS0VIJdwiO0U
+      - REDIS_HOST=redis-15181.c275.us-east-1-4.ec2.redns.redis-cloud.com
+      - REDIS_PORT=15181
+      - REDIS_DB=0
+      - RABBITMQ_HOST=rabbitmq
+      - PINECONE_API_KEY=pcsk_Tq7mn_QBLx9zduBRFh9sFF3NNzFe4iAZpqpceWkZwAjKhHnap9FVLAu91xZLwt48BQrvF
+      - PINECONE_ENVIRONMENT=us-east-1
+
+  flink_job:
+    build:
+      context: ./workers
+      dockerfile: Dockerfile
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+      backend:
+        condition: service_started
+    networks:
+      - app-network
+    environment:
+      - RABBITMQ_HOST=  
+      - FLINK_LOG_LEVEL=DEBUG
+      - JAVA_HOME=/usr/lib/jvm/java-17-openjdk-amd64
+      - PYTHONPATH=/app
+    command: /bin/bash -c "sleep 15 && source .venv/bin/activate && python -m app.flink_job"
+    
+networks:
+  app-network:
+    driver: bridge

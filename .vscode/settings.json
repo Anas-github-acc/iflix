@@ -1,0 +1,10 @@
+{
+  "github.copilot.enable": {
+    "*": false,
+    "plaintext": true,
+    "markdown": true,
+    "scminput": false,
+    "cpp": false,
+    "verilog": true
+  }
+}
